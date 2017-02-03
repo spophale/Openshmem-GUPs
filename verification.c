@@ -46,7 +46,6 @@
 #define BUCKET_SIZE 1024
 #define SLOT_CNT 1
 #define FIRST_SLOT 2
-int sAbort, rAbort;
 
 void
 HPCC_Power2NodesSHMEMRandomAccessCheck(u64Int logTableSize,
@@ -74,10 +73,14 @@ HPCC_Power2NodesSHMEMRandomAccessCheck(u64Int logTableSize,
 
   u64Int *LocalBuckets;     /* buckets used in verification phase */
   u64Int *GlobalBuckets;    /* buckets used in verification phase */
-  
+ 
+ /*For SHMEM*/ 
+  int *sAbort, *rAbort;
   long *ipSync;
   int *ipWrk;
 
+  sAbort = (int *)shmem_malloc(sizeof(int));
+  rAbort = (int *)shmem_malloc(sizeof(int));
   ipSync = (long *)shmem_malloc(sizeof(long) *_SHMEM_BCAST_SYNC_SIZE);
   ipWrk = (int *)shmem_malloc(sizeof(int) * _SHMEM_REDUCE_SYNC_SIZE);
 
@@ -88,24 +91,24 @@ HPCC_Power2NodesSHMEMRandomAccessCheck(u64Int logTableSize,
   }
 
   LocalBuckets = shmem_malloc(sizeof(u64Int)*NumProcs*(slot_size));
-  sAbort = 0; if (! LocalBuckets) sAbort = 1;
+  *sAbort = 0; if (! LocalBuckets) *sAbort = 1;
   shmem_barrier_all(); 
-  shmem_int_sum_to_all(&rAbort, &sAbort, 1, 0, 0, NumProcs,ipWrk,ipSync );
+  shmem_int_sum_to_all(rAbort, sAbort, 1, 0, 0, NumProcs,ipWrk,ipSync );
   shmem_barrier_all(); 
 
-  if (rAbort > 0) {
+  if (*rAbort > 0) {
     if (MyProc == 0) fprintf(stderr, "Failed to allocate memory for local buckets.\n");
     goto failed_localbuckets;
   }
   GlobalBuckets = shmem_malloc(sizeof(u64Int)*NumProcs*(slot_size));
 
-  sAbort = 0; if (! GlobalBuckets) sAbort = 1;
+  *sAbort = 0; if (! GlobalBuckets) *sAbort = 1;
 
   shmem_barrier_all();
-  shmem_int_sum_to_all(&rAbort, &sAbort, 1, 0, 0, NumProcs,ipWrk,ipSync );
+  shmem_int_sum_to_all(rAbort, sAbort, 1, 0, 0, NumProcs,ipWrk,ipSync );
   shmem_barrier_all(); 
 
-  if (rAbort > 0) {
+  if (*rAbort > 0) {
     if (MyProc == 0) fprintf(stderr, "Failed to allocate memory for global buckets.\n");
     goto failed_globalbuckets;
   }
@@ -185,5 +188,9 @@ HPCC_Power2NodesSHMEMRandomAccessCheck(u64Int logTableSize,
   shmem_free( LocalBuckets );
 
   failed_localbuckets:
+  
+
+  shmem_free(sAbort);
+  shmem_free(rAbort);
   return;
 }

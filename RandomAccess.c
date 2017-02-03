@@ -161,8 +161,6 @@ u64Int *HPCC_Table;
 
 u64Int LocalSendBuffer[LOCAL_BUFFER_SIZE];
 u64Int LocalRecvBuffer[MAX_RECV*LOCAL_BUFFER_SIZE];
-s64Int NumErrors, GlbNumErrors;
-int sAbort, rAbort;
 
 int
 HPCC_SHMEMRandomAccess(HPCC_Params *params) {
@@ -187,13 +185,14 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
   u64Int NumUpdates;  /* actual number of updates to table - may be smaller than
                        * NumUpdates_Default due to execution time bounds */
   s64Int ProcNumUpdates; /* number of updates per processor */
+  s64Int *NumErrors, *GlbNumErrors;
 
 #ifdef RA_TIME_BOUND
   s64Int GlbNumUpdates;  /* for reduction */
 #endif
 
   long *llpSync;
-  long long int *llpWrk;
+  long long *llpWrk;
 
   long *ipSync;
   int *ipWrk;
@@ -204,13 +203,24 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
 
 
   int numthreads;
+  int *sAbort, *rAbort;
+
 
   /*Allocate symmetric memory*/
+  sAbort = (int *)shmem_malloc(sizeof(int));
+  rAbort = (int *)shmem_malloc(sizeof(int));
   llpSync = (long *)shmem_malloc(sizeof(long) *_SHMEM_BCAST_SYNC_SIZE);
-  llpWrk = (long long int *)shmem_malloc(sizeof(long long int) * _SHMEM_REDUCE_SYNC_SIZE);
+  llpWrk = (long long *)shmem_malloc(sizeof(long long) * _SHMEM_REDUCE_SYNC_SIZE);
   ipSync = (long *)shmem_malloc(sizeof(long) *_SHMEM_BCAST_SYNC_SIZE);
   ipWrk = (int *)shmem_malloc(sizeof(int) * _SHMEM_REDUCE_SYNC_SIZE);
 
+  GUPs = (double *)shmem_malloc(sizeof(double));
+  temp_GUPs = (double *)shmem_malloc(sizeof(double));
+  GlbNumErrors = (s64Int *)shmem_malloc(sizeof(s64Int));
+  NumErrors = (s64Int *)shmem_malloc(sizeof(s64Int));
+
+  *GlbNumErrors = 0;
+  *NumErrors = 0;
 
   for (i = 0; i < _SHMEM_BCAST_SYNC_SIZE; i += 1){
         ipSync[i] = _SHMEM_SYNC_VALUE;
@@ -259,18 +269,18 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
     }
     return 0;
   }
-  sAbort = 0;
+  *sAbort = 0;
   HPCC_Table = HPCC_XMALLOC( s64Int, LocalTableSize );
 
-  if (! HPCC_Table) sAbort = 1;
+  if (! HPCC_Table) *sAbort = 1;
 
 
 
   shmem_barrier_all();
-  shmem_int_sum_to_all(&rAbort, &sAbort, 1, 0, 0, NumProcs, ipWrk, ipSync);
+  shmem_int_sum_to_all(rAbort, sAbort, 1, 0, 0, NumProcs, ipWrk, ipSync);
   shmem_barrier_all();
 
-  if (rAbort > 0) {
+  if (*rAbort > 0) {
     if (MyProc == 0) fprintf(outFile, "Failed to allocate memory for the main table.\n");
     /* check all allocations in case there are new added and their order changes */
     if (HPCC_Table) HPCC_free( HPCC_Table );
@@ -336,11 +346,11 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
   temp_GUPs = GUPs;
   shmem_barrier_all();
   shmem_broadcast64(GUPs,temp_GUPs,1,0,0,0,NumProcs,llpSync);
-  shmem_barrier_all();
 
   /* Verification phase */
 
   /* Begin timing here */
+  shmem_barrier_all(); 
 
   RealTime = -RTSEC();
 
@@ -349,12 +359,10 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
                                     GlobalStartMyProc,
                                     logNumProcs, NumProcs,
                                     MyProc, ProcNumUpdates,
-                                    &NumErrors);
+                                    NumErrors);
 
   shmem_barrier_all(); 
-  shmem_longlong_sum_to_all( &GlbNumErrors,  &NumErrors, 1, 0,0, NumProcs,llpWrk, llpSync);
-  shmem_barrier_all(); 
-
+  shmem_longlong_sum_to_all( GlbNumErrors,  NumErrors, 1, 0,0, NumProcs,llpWrk, llpSync);
   /* End timed section */
 
   RealTime += RTSEC();
@@ -365,11 +373,11 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
 
     fprintf( outFile, "Verification:  Real time used = %.6f seconds\n", RealTime);
     fprintf( outFile, "Found " FSTR64 " errors in " FSTR64 " locations (%s).\n",
-             GlbNumErrors, TableSize, (GlbNumErrors <= 0.01*TableSize) ?
+             GlbNumErrors, TableSize, (*GlbNumErrors <= 0.01*TableSize) ?
              "passed" : "failed");
-    if (GlbNumErrors > 0.01*TableSize) params->Failure = 1;
-    params->SHMEMRandomAccess_Errors = (s64Int)GlbNumErrors;
-    params->SHMEMRandomAccess_ErrorsFraction = (double)GlbNumErrors / (double)TableSize;
+    if (*GlbNumErrors > 0.01*TableSize) params->Failure = 1;
+    params->SHMEMRandomAccess_Errors = (s64Int) *GlbNumErrors;
+    params->SHMEMRandomAccess_ErrorsFraction = (double) *GlbNumErrors / (double)TableSize;
     params->SHMEMRandomAccess_Algorithm = 1;
   }
   /* End verification phase */
@@ -385,6 +393,8 @@ HPCC_SHMEMRandomAccess(HPCC_Params *params) {
 
   shmem_barrier_all();
 
+  shmem_free(sAbort); 
+  shmem_free(rAbort); 
   shmem_free(llpSync); 
   shmem_free(llpWrk);
   shmem_free(ipSync);
