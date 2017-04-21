@@ -57,7 +57,7 @@ LIBS           = $(SHMEM_LIBS) -lm
 
 TARGET         = gups
 
-SOURCES        = RandomAccess.c SHMEMRandomAccess.c verification.c
+SOURCES        = SHMEMRandomAccess.c 
 OBJECTS        = $(SOURCES:.c=.o) 
 
 .PHONY:	all	clean
@@ -80,4 +80,3 @@ clean:
 #
 
 SHMEMRandomAccess.o:	RandomAccess.h
-verification.o:		RandomAccess.h
