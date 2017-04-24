@@ -131,7 +131,7 @@ int main(int argc, char **argv)
   s64Int *count;
   s64Int *updates;
   s64Int *all_updates;
-  s64Int *ran;
+  s64Int ran;
 
   shmem_init();
 
@@ -227,11 +227,10 @@ int main(int argc, char **argv)
 
 
   count = (s64Int *) shmem_malloc(sizeof(s64Int));
-  ran = (s64Int *) shmem_malloc(sizeof(s64Int));
   updates = (s64Int *) shmem_malloc(sizeof(s64Int) * NumProcs);/*SP: An array of length npes to avoid overwrites*/
   all_updates = (s64Int *) shmem_malloc(sizeof(s64Int) * NumProcs);/*SP: An array to collect sum*/
 
-  *ran = starts(4*GlobalStartMyProc);
+  ran = starts(4*GlobalStartMyProc);
 
   niterate = ProcNumUpdates;
   logTableLocal = logTableSize - logNumProcs;
@@ -255,26 +254,39 @@ int main(int argc, char **argv)
   int verify=1; 
   u64Int remote_val;
 
+#pragma omp parallel
+{
+  nt = omp_get_num_threads();
+  tid = omp_get_thread_num();
+ // printf("Th%d of PE%d here!\n",tid,MyProc);
+}
   shmem_barrier_all();
+
+
   /* Begin timed section */
   RealTime = -RTSEC();
+
+#pragma omp parallel 
+{
+
+#pragma omp for private(ran,remote_proc,remote_val)
   for (iterate = 0; iterate < niterate; iterate++) {
-      *ran = (*ran << 1) ^ ((s64Int) *ran < ZERO64B ? POLY : ZERO64B);
-      remote_proc = (*ran >> logTableLocal) & (NumProcs - 1);
+      ran = (ran << 1) ^ ((s64Int) ran < ZERO64B ? POLY : ZERO64B);
+      remote_proc = (ran >> logTableLocal) & (NumProcs - 1);
 
       /*SP: Forces updates to remote PE only*/
       if(remote_proc == MyProc)
         remote_proc = (remote_proc+1)/NumProcs;
 
-      remote_val  = shmem_longlong_g( &HPCC_Table[*ran & (LocalTableSize-1)],remote_proc);
-      remote_val ^= *ran;
-      shmem_longlong_p(&HPCC_Table[*ran & (LocalTableSize-1)],remote_val, remote_proc);
+      remote_val  = shmem_longlong_g( &HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
+      remote_val ^= ran;
+      shmem_longlong_p(&HPCC_Table[ran & (LocalTableSize-1)],remote_val, remote_proc);
       shmem_quiet();
 
       if(verify)
         shmem_longlong_inc(&updates[MyProc], remote_proc);
   }
-  
+ }//end omp-parallel 
   shmem_barrier_all();
   /* End timed section */
   RealTime += RTSEC();
@@ -318,7 +330,6 @@ int main(int argc, char **argv)
 
   shmem_free(count);
   shmem_free(updates);
-  shmem_free(ran);
   shmem_barrier_all();
 
   /* Deallocate memory (in reverse order of allocation which should
