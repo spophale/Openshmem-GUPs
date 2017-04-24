@@ -62,6 +62,9 @@
 #include "RandomAccess.h"
 #include <shmem.h>
 #define MAXTHREADS 256
+ 
+#include<shmemx.h>
+#include <omp.h>
 
 void
 do_abort(char* f)
@@ -116,8 +119,19 @@ int main(int argc, char **argv)
   double *temp_GUPs;
 
 
-  int numthreads;
+  int nt, tid;
   int *sAbort, *rAbort;
+
+  int j,k;
+  int logTableLocal,iterate,niterate;
+  int nlocalm1;
+  u64Int datum,procmask;
+  int remote_proc, offset;
+  s64Int remotecount;
+  s64Int *count;
+  s64Int *updates;
+  s64Int *all_updates;
+  s64Int *ran;
 
   shmem_init();
 
@@ -210,32 +224,12 @@ int main(int argc, char **argv)
 
   shmem_barrier_all();
 
-  int j,k;
-  int logTableLocal,ipartner,iterate,niterate;
-  int ndata,nkeep,nsend,nrecv,index,nlocalm1;
-  int numthrds;
-  u64Int datum,procmask;
-  u64Int *data,*send;
-  void * tstatus;
-  int remote_proc, offset;
-  u64Int *tb;
-  s64Int remotecount;
-  int thisPeId;
-  int numNodes;
-  int count2;
 
-  s64Int *count;
-  s64Int *updates;
-  s64Int *all_updates;
-  s64Int *ran;
-
-  thisPeId = shmem_my_pe();
-  numNodes = shmem_n_pes();
 
   count = (s64Int *) shmem_malloc(sizeof(s64Int));
   ran = (s64Int *) shmem_malloc(sizeof(s64Int));
-  updates = (s64Int *) shmem_malloc(sizeof(s64Int) * numNodes);/*SP: An array of length npes to avoid overwrites*/
-  all_updates = (s64Int *) shmem_malloc(sizeof(s64Int) * numNodes);/*SP: An array to collect sum*/
+  updates = (s64Int *) shmem_malloc(sizeof(s64Int) * NumProcs);/*SP: An array of length npes to avoid overwrites*/
+  all_updates = (s64Int *) shmem_malloc(sizeof(s64Int) * NumProcs);/*SP: An array to collect sum*/
 
   *ran = starts(4*GlobalStartMyProc);
 
@@ -254,7 +248,7 @@ int main(int argc, char **argv)
    *     }
    */
 
-  for (j = 0; j < numNodes; j++){
+  for (j = 0; j < NumProcs; j++){
     updates[j] = 0;
     all_updates = 0;
   }
@@ -266,11 +260,11 @@ int main(int argc, char **argv)
   RealTime = -RTSEC();
   for (iterate = 0; iterate < niterate; iterate++) {
       *ran = (*ran << 1) ^ ((s64Int) *ran < ZERO64B ? POLY : ZERO64B);
-      remote_proc = (*ran >> logTableLocal) & (numNodes - 1);
+      remote_proc = (*ran >> logTableLocal) & (NumProcs - 1);
 
       /*SP: Forces updates to remote PE only*/
       if(remote_proc == MyProc)
-        remote_proc = (remote_proc+1)/numNodes;
+        remote_proc = (remote_proc+1)/NumProcs;
 
       remote_val  = shmem_longlong_g( &HPCC_Table[*ran & (LocalTableSize-1)],remote_proc);
       remote_val ^= *ran;
@@ -278,7 +272,7 @@ int main(int argc, char **argv)
       shmem_quiet();
 
       if(verify)
-        shmem_longlong_inc(&updates[thisPeId], remote_proc);
+        shmem_longlong_inc(&updates[MyProc], remote_proc);
   }
   
   shmem_barrier_all();
@@ -300,7 +294,7 @@ int main(int argc, char **argv)
   }
  
   if(verify){
-    for (j = 1; j < numNodes; j++)
+    for (j = 1; j < NumProcs; j++)
       updates[0] += updates[j];
     int cpu = sched_getcpu();
     printf("PE%d CPU%d  updates:%d\n",MyProc,cpu,updates[0]);
@@ -309,7 +303,7 @@ int main(int argc, char **argv)
     /*
     shmem_longlong_sum_to_all(all_updates,updates, NumProcs, 0,0, NumProcs,llpWrk, llpSync);
     if(MyProc == 0){
-      for (j = 1; j < numNodes; j++)
+      for (j = 1; j < NumProcs; j++)
         all_updates[0] += all_updates[j];
       if(ProcNumUpdates*NumProcs == all_updates[0])
         printf("Verification passed!\n");
