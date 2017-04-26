@@ -42,7 +42,7 @@
 CC             = oshcc
 LD             = $(CC)
 
-CFLAGS         = -O3
+CFLAGS         = -g -O3 -fopenmp
 
 #
 # any extra paths/flags needed

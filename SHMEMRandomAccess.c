@@ -129,12 +129,16 @@ int main(int argc, char **argv)
   int remote_proc, offset;
   s64Int remotecount;
   s64Int *count;
-  s64Int *updates;
   s64Int *all_updates;
   s64Int ran;
 
   shmem_init();
 
+#pragma omp parallel
+{
+  nt = omp_get_num_threads();
+ // printf("Th%d of PE%d here!\n",tid,MyProc);
+}
   /*Allocate symmetric memory*/
   sAbort = (int *)shmem_malloc(sizeof(int));
   rAbort = (int *)shmem_malloc(sizeof(int));
@@ -227,7 +231,10 @@ int main(int argc, char **argv)
 
 
   count = (s64Int *) shmem_malloc(sizeof(s64Int));
-  updates = (s64Int *) shmem_malloc(sizeof(s64Int) * NumProcs);/*SP: An array of length npes to avoid overwrites*/
+  s64Int **updates = (s64Int **) shmem_malloc(sizeof(s64Int *) * NumProcs);/*SP: A 2D array of npes X nt to avoid overwrites*/
+  for(i=0;i<NumProcs;i++)
+    updates[i] = (s64Int *) shmem_malloc(sizeof(s64Int) * nt);
+
   all_updates = (s64Int *) shmem_malloc(sizeof(s64Int) * NumProcs);/*SP: An array to collect sum*/
 
   ran = starts(4*GlobalStartMyProc);
@@ -247,44 +254,44 @@ int main(int argc, char **argv)
    *     }
    */
 
-  for (j = 0; j < NumProcs; j++){
-    updates[j] = 0;
-    all_updates = 0;
+  for (i = 0; i < NumProcs; i++){
+    for (j = 0; j < nt; j++){
+      updates[i][j] = 0;
+    }
   }
-  int verify=1; 
+  int verify=0, total_updates=0; 
   u64Int remote_val;
 
-#pragma omp parallel
-{
-  nt = omp_get_num_threads();
-  tid = omp_get_thread_num();
- // printf("Th%d of PE%d here!\n",tid,MyProc);
-}
   shmem_barrier_all();
 
 
   /* Begin timed section */
   RealTime = -RTSEC();
 
-#pragma omp parallel 
+#pragma omp parallel firstprivate(ran) private(tid,remote_proc,remote_val)
 {
+  tid = omp_get_thread_num();
+  shmemx_ctx_h ctx;
+  shmemx_ctx_create( &ctx );
 
-#pragma omp for private(ran,remote_proc,remote_val)
+#pragma omp for private(iterate) 
   for (iterate = 0; iterate < niterate; iterate++) {
       ran = (ran << 1) ^ ((s64Int) ran < ZERO64B ? POLY : ZERO64B);
       remote_proc = (ran >> logTableLocal) & (NumProcs - 1);
 
       /*SP: Forces updates to remote PE only*/
       if(remote_proc == MyProc)
-        remote_proc = (remote_proc+1)/NumProcs;
+        remote_proc = (remote_proc+1)%NumProcs;
 
-      remote_val  = shmem_longlong_g( &HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
+      //remote_val  = shmem_longlong_g( &HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
+      remote_val  = shmemx_ctx_longlong_g(ctx, &HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
       remote_val ^= ran;
-      shmem_longlong_p(&HPCC_Table[ran & (LocalTableSize-1)],remote_val, remote_proc);
-      shmem_quiet();
+      shmemx_ctx_longlong_p(ctx, &HPCC_Table[ran & (LocalTableSize-1)],remote_val, remote_proc);
+      shmemx_ctx_quiet(ctx);
 
-      if(verify)
-        shmem_longlong_inc(&updates[MyProc], remote_proc);
+      if(verify){
+        shmemx_ctx_longlong_inc(ctx, &(updates[MyProc][tid]), remote_proc);
+      }
   }
  }//end omp-parallel 
   shmem_barrier_all();
@@ -306,10 +313,13 @@ int main(int argc, char **argv)
   }
  
   if(verify){
-    for (j = 1; j < NumProcs; j++)
-      updates[0] += updates[j];
+    for (i = 0; i < NumProcs; i++)
+      for (j = 0; j < nt; j++){
+        total_updates += updates[i][j];
+        //printf("PE%d: updates[%d][%d] = %d\n",MyProc,i,j,updates[i][j]);
+      }
     int cpu = sched_getcpu();
-    printf("PE%d CPU%d  updates:%d\n",MyProc,cpu,updates[0]);
+    //printf("PE%d CPU%d  updates:%d\n",MyProc,cpu,total_updates);
 
     /*SP: Use this when reductions are working again*/
     /*
@@ -329,6 +339,8 @@ int main(int argc, char **argv)
 
 
   shmem_free(count);
+  for(i=0;i<NumProcs;i++)
+    shmem_free(updates[i]);
   shmem_free(updates);
   shmem_barrier_all();
 
