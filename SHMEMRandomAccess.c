@@ -63,7 +63,6 @@
 #include <shmem.h>
 #define MAXTHREADS 256
  
-#include<shmemx.h>
 #include <omp.h>
 
 void
@@ -208,8 +207,8 @@ int main(int argc, char **argv)
   NumUpdates_Default = 4 * TableSize;
   ProcNumUpdates = 4*LocalTableSize;
   NumUpdates = NumUpdates_Default;
-
   if (MyProc == 0) {
+/*
     fprintf( outFile, "Running on %d processors%s\n", NumProcs, PowerofTwo ? " (PowerofTwo)" : "");
     fprintf( outFile, "Total Main table size = 2^" FSTR64 " = " FSTR64 " words\n",logTableSize, TableSize );
     if (PowerofTwo)
@@ -220,8 +219,9 @@ int main(int argc, char **argv)
                  logTableSize, NumProcs, LocalTableSize);
 
     fprintf( outFile, "Default number of updates (RECOMMENDED) = " FSTR64 "\tand actually done = %d\n", NumUpdates_Default,ProcNumUpdates*NumProcs);
+*/
+    fprintf( outFile, " %d\t\t\t", ProcNumUpdates*NumProcs);
   }
-
   /* Initialize main table */
   for (i=0; i<LocalTableSize; i++)
     HPCC_Table[i] = MyProc;
@@ -271,8 +271,6 @@ int main(int argc, char **argv)
 #pragma omp parallel firstprivate(ran) private(tid,remote_proc,remote_val)
 {
   tid = omp_get_thread_num();
-  shmemx_ctx_h ctx;
-  shmemx_ctx_create( &ctx );
 
 #pragma omp for private(iterate) 
   for (iterate = 0; iterate < niterate; iterate++) {
@@ -284,13 +282,13 @@ int main(int argc, char **argv)
         remote_proc = (remote_proc+1)%NumProcs;
 
       //remote_val  = shmem_longlong_g( &HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
-      remote_val  = shmemx_ctx_longlong_g(ctx, &HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
+      remote_val  = shmem_longlong_g(&HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
       remote_val ^= ran;
-      shmemx_ctx_longlong_p(ctx, &HPCC_Table[ran & (LocalTableSize-1)],remote_val, remote_proc);
-      shmemx_ctx_quiet(ctx);
+      shmem_longlong_p(&HPCC_Table[ran & (LocalTableSize-1)],remote_val, remote_proc);
+      shmem_quiet();
 
       if(verify){
-        shmemx_ctx_longlong_inc(ctx, &(updates[MyProc][tid]), remote_proc);
+        shmem_longlong_inc( &(updates[MyProc][tid]), remote_proc);
       }
   }
  }//end omp-parallel 
@@ -303,11 +301,14 @@ int main(int argc, char **argv)
   /* Print timing results */
   if (MyProc == 0){
     *GUPs = 1e-9*NumUpdates / RealTime;
+    fprintf( outFile, " %.6f \t\t\t %.9f\n", RealTime,*GUPs );
+    /*
     fprintf( outFile, "Real time used = %.6f seconds\n", RealTime );
     fprintf( outFile, "%.9f Billion(10^9) Updates    per second [GUP/s]\n",
              *GUPs );
     fprintf( outFile, "%.9f Billion(10^9) Updates/PE per second [GUP/s]\n",
              *GUPs / NumProcs );
+    */
     /* No longer reporting per CPU number */
     /* *GUPs /= NumProcs; */
   }
