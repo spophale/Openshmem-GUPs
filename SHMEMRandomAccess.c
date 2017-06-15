@@ -285,12 +285,15 @@ int main(int argc, char **argv)
       remote_val  = shmem_longlong_g(&HPCC_Table[ran & (LocalTableSize-1)],remote_proc);
       remote_val ^= ran;
       shmem_longlong_p(&HPCC_Table[ran & (LocalTableSize-1)],remote_val, remote_proc);
-      shmem_quiet();
 
       if(verify){
         shmem_longlong_inc( &(updates[MyProc][tid]), remote_proc);
       }
   }
+#pragma omp barrier
+#pragma omp master
+  shmem_quiet();
+
  }//end omp-parallel 
   shmem_barrier_all();
   /* End timed section */
