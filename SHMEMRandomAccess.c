@@ -209,6 +209,7 @@ int main(int argc, char **argv)
   ProcNumUpdates = 4*LocalTableSize;
   NumUpdates = NumUpdates_Default;
 
+/*
   if (MyProc == 0) {
     fprintf( outFile, "Running on %d processors%s\n", NumProcs, PowerofTwo ? " (PowerofTwo)" : "");
     fprintf( outFile, "Total Main table size = 2^" FSTR64 " = " FSTR64 " words\n",logTableSize, TableSize );
@@ -221,7 +222,7 @@ int main(int argc, char **argv)
 
     fprintf( outFile, "Default number of updates (RECOMMENDED) = " FSTR64 "\tand actually done = %d\n", NumUpdates_Default,ProcNumUpdates*NumProcs);
   }
-
+*/
   /* Initialize main table */
   for (i=0; i<LocalTableSize; i++)
     HPCC_Table[i] = MyProc;
@@ -302,12 +303,13 @@ int main(int argc, char **argv)
 
   /* Print timing results */
   if (MyProc == 0){
+    
     *GUPs = 1e-9*NumUpdates / RealTime;
-    fprintf( outFile, "Real time used = %.6f seconds\n", RealTime );
+    //fprintf( outFile, "Real time used = %.6f seconds\n", RealTime );
     fprintf( outFile, "%.9f Billion(10^9) Updates    per second [GUP/s]\n",
              *GUPs );
-    fprintf( outFile, "%.9f Billion(10^9) Updates/PE per second [GUP/s]\n",
-             *GUPs / NumProcs );
+    //fprintf( outFile, "%.9f Billion(10^9) Updates/PE per second [GUP/s]\n",
+    //         *GUPs / NumProcs );
     /* No longer reporting per CPU number */
     /* *GUPs /= NumProcs; */
   }
